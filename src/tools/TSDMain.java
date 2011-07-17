@@ -96,9 +96,6 @@ final class TSDMain {
     argp.addOption("--flush-interval", "MSEC",
                    "Maximum time for which a new data point can be buffered"
                    + " (default: " + DEFAULT_FLUSH_INTERVAL + ").");
-    argp.addOption("--auto-metric", "Automatically add metrics to tsdb as they"
-                   + " are inserted.  Warning: this may cause unexpected"
-                   + " metrics to be tracked");
     argp.addOption("--hbase-row-scan", "NUM",
                    "Number of rows to scan from hbase in a single pass");
     argp.addOption("--disable-cache", "Every request is recomputed"
