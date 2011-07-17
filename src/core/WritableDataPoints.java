@@ -1,5 +1,5 @@
 // This file is part of OpenTSDB.
-// Copyright (C) 2010  StumbleUpon, Inc.
+// Copyright (C) 2010  The OpenTSDB Authors.
 //
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU Lesser General Public License as published by
@@ -32,10 +32,7 @@ public interface WritableDataPoints extends DataPoints {
    * adding data points to another time series without having to create a new
    * instance.
    * @param metric A non-empty string.
-   * @param tags The tags on this series.  This non-empty list must have an
-   * even number of elements.  The elements in the list must be alternating
-   * between a tag name and a tag value, starting with a tag name.  Example:
-   * <code>{ "host", "web42", "iface", "eth2" }</code>
+   * @param tags The tags on this series.  This map must be non-empty.
    * @throws IllegalArgumentException if the metric name is empty or contains
    * illegal characters.
    * @throws IllegalArgumentException if the tags list is empty or one of the

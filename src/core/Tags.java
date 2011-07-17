@@ -1,5 +1,5 @@
 // This file is part of OpenTSDB.
-// Copyright (C) 2010  StumbleUpon, Inc.
+// Copyright (C) 2010  The OpenTSDB Authors.
 //
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU Lesser General Public License as published by
@@ -128,7 +128,7 @@ public final class Tags {
   /**
    * Parses an integer value as a long from the given character sequence.
    * <p>
-   * This is equivalent to {@link Long.parseLong(String)} except it's up to
+   * This is equivalent to {@link Long#parseLong(String)} except it's up to
    * 100% faster on {@link String} and always works in O(1) space even with
    * {@link StringBuilder} buffers (where it's 2x to 5x faster).
    * @param s The character sequence containing the integer value to parse.

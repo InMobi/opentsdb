@@ -1,5 +1,5 @@
 // This file is part of OpenTSDB.
-// Copyright (C) 2010  StumbleUpon, Inc.
+// Copyright (C) 2010  The OpenTSDB Authors.
 //
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU Lesser General Public License as published by
@@ -18,6 +18,7 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.net.URL;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -125,18 +126,8 @@ final class GraphHandler implements HttpRpc {
     if (end_time == -1) {
       end_time = now;
     }
-    // If the end time is in the future (1), make the graph uncacheable.
-    // Otherwise, if the end time is far enough in the past (2) such that
-    // no TSD can still be writing to rows for that time span, make the graph
-    // cacheable for a day since it's very unlikely that any data will change
-    // for this time span.
-    // Otherwise (3), allow the client to cache the graph for ~0.1% of the
-    // time span covered by the request e.g., for 1h of data, it's OK to
-    // serve something 3s stale, for 1d of data, 84s stale.
-    final int max_age = (end_time > now ? 0                              // (1)
-                         : (end_time < now - Const.MAX_TIMESPAN ? 86400  // (2)
-                            : (int) (end_time - start_time) >> 10));     // (3)
-    if (!nocache && isDiskCacheHit(query, max_age, basepath)) {
+    final int max_age = computeMaxAge(query, start_time, end_time, now);
+    if (!nocache && isDiskCacheHit(query, end_time, max_age, basepath)) {
       return;
     }
     Query[] tsdbqueries;
@@ -202,6 +193,40 @@ final class GraphHandler implements HttpRpc {
     } catch (RejectedExecutionException e) {
       query.internalError(new Exception("Too many requests pending,"
                                         + " please try again later", e));
+    }
+  }
+
+  /**
+   * Decides how long we're going to allow the client to cache our response.
+   * <p>
+   * Based on the query, we'll decide whether or not we want to allow the
+   * client to cache our response and for how long.
+   * @param query The query to serve.
+   * @param start_time The start time on the query (32-bit unsigned int, secs).
+   * @param end_time The end time on the query (32-bit unsigned int, seconds).
+   * @param now The current time (32-bit unsigned int, seconds).
+   * @return A positive integer, in seconds.
+   */
+  private static int computeMaxAge(final HttpQuery query,
+                                   final long start_time, final long end_time,
+                                   final long now) {
+    // If the end time is in the future (1), make the graph uncacheable.
+    // Otherwise, if the end time is far enough in the past (2) such that
+    // no TSD can still be writing to rows for that time span and it's not
+    // specified in a relative fashion (3) (e.g. "1d-ago"), make the graph
+    // cacheable for a day since it's very unlikely that any data will change
+    // for this time span.
+    // Otherwise (4), allow the client to cache the graph for ~0.1% of the
+    // time span covered by the request e.g., for 1h of data, it's OK to
+    // serve something 3s stale, for 1d of data, 84s stale.
+    if (end_time > now) {                            // (1)
+      return 0;
+    } else if (end_time < now - Const.MAX_TIMESPAN   // (2)
+               && !isRelativeDate(query, "start")    // (3)
+               && !isRelativeDate(query, "end")) {
+      return 86400;
+    } else {                                         // (4)
+      return (int) (end_time - start_time) >> 10;
     }
   }
 
@@ -321,6 +346,7 @@ final class GraphHandler implements HttpRpc {
   /**
    * Checks whether or not it's possible to re-serve this query from disk.
    * @param query The query to serve.
+   * @param end_time The end time on the query (32-bit unsigned int, seconds).
    * @param max_age The maximum time (in seconds) we wanna allow clients to
    * cache the result in case of a cache hit.
    * @param basepath The base path used for the Gnuplot files.
@@ -329,6 +355,7 @@ final class GraphHandler implements HttpRpc {
    * the query needs to be processed).
    */
   private boolean isDiskCacheHit(final HttpQuery query,
+                                 final long end_time,
                                  final int max_age,
                                  final String basepath) throws IOException {
 
@@ -347,11 +374,11 @@ final class GraphHandler implements HttpRpc {
                 + bytes + " bytes) to be valid.  Ignoring it.");
         return false;
       }
-      if (staleCacheFile(query, max_age, cachedfile)) {
+      if (staleCacheFile(query, end_time, max_age, cachedfile)) {
         return false;
       }
       if (query.hasQueryStringParam("json")) {
-        StringBuilder json = loadCachedJson(query, max_age, basepath);
+        StringBuilder json = loadCachedJson(query, end_time, max_age, basepath);
         if (json == null) {
           json = new StringBuilder(32);
           json.append("{\"timing\":");
@@ -372,7 +399,7 @@ final class GraphHandler implements HttpRpc {
     }
     // We didn't find an image.  Do a negative cache check.  If we've seen
     // this query before but there was no result, we at least wrote the JSON.
-    final StringBuilder json = loadCachedJson(query, max_age, basepath);
+    final StringBuilder json = loadCachedJson(query, end_time, max_age, basepath);
     // If we don't have a JSON file it's a complete cache miss.  If we have
     // one, and it says 0 data points were plotted, it's a negative cache hit.
     if (json == null || !json.toString().contains("\"plotted\":0")) {
@@ -396,38 +423,49 @@ final class GraphHandler implements HttpRpc {
   /**
    * Returns whether or not the given cache file can be used or is stale.
    * @param query The query to serve.
+   * @param end_time The end time on the query (32-bit unsigned int, seconds).
    * @param max_age The maximum time (in seconds) we wanna allow clients to
-   * cache the result in case of a cache hit.
+   * cache the result in case of a cache hit.  If the file is exactly that
+   * old, it is not considered stale.
    * @param cachedfile The file to check for staleness.
    */
-  private boolean staleCacheFile(final HttpQuery query,
-                                 final long max_age,
-                                 final File cachedfile) {
+  private static boolean staleCacheFile(final HttpQuery query,
+                                        final long end_time,
+                                        final long max_age,
+                                        final File cachedfile) {
     final long mtime = cachedfile.lastModified() / 1000;
     if (mtime <= 0) {
       return true;  // File doesn't exist, or can't be read.
     }
-    // Queries that don't specify an end-time must be handled carefully,
-    // since time passes and we may need to regenerate the results in case
-    // new data points have arrived in the mean time.
-    final String end = query.getQueryStringParam("end");
-    if (end == null || end.endsWith("ago")) {
-      // How many seconds stale?
-      final long staleness = System.currentTimeMillis() / 1000 - mtime;
-      if (staleness < 0) {  // Can happen if the mtime is "in the future".
-        logWarn(query, "Not using file @ " + cachedfile + " with weird"
-                + " mtime in the future: " + mtime);
-        return true;
-      }
-      // If our graph is older than 0.1% of the duration of the request,
-      // let's regenerate it in order to avoid service data that's too
-      // stale, e.g., for 1h of data, it's OK to serve something 3s stale.
-      if (staleness > max_age) {
-        logInfo(query, "Cached file @ " + cachedfile.getPath() + " is "
-                + staleness + "s stale, which is more than its limit of "
-                + max_age + "s, and needs to be regenerated.");
-        return true;
-      }
+
+    final long now = System.currentTimeMillis() / 1000;
+    // How old is the cached file, in seconds?
+    final long staleness = now - mtime;
+    if (staleness < 0) {  // Can happen if the mtime is "in the future".
+      logWarn(query, "Not using file @ " + cachedfile + " with weird"
+              + " mtime in the future: " + mtime);
+      return true;  // Play it safe, pretend we can't use this file.
+    }
+
+    // Case 1: The end time is an absolute point in the past.
+    // We might be able to re-use the cached file.
+    if (0 < end_time && end_time < now) {
+      // If the file was created prior to the end time, maybe we first
+      // executed this query while the result was uncacheable.  We can
+      // tell by looking at the mtime on the file.  If the file was created
+      // before the query end time, then it contains partial results that
+      // shouldn't be served again.
+      return mtime < end_time;
+    }
+
+    // Case 2: The end time of the query is now or in the future.
+    // The cached file contains partial data and can only be re-used if it's
+    // not too old.
+    if (staleness > max_age) {
+      logInfo(query, "Cached file @ " + cachedfile.getPath() + " is "
+              + staleness + "s stale, which is more than its limit of "
+              + max_age + "s, and needs to be regenerated.");
+      return true;
     }
     return false;
   }
@@ -501,6 +539,7 @@ final class GraphHandler implements HttpRpc {
   /**
    * Attempts to read the cached {@code .json} file for this query.
    * @param query The query to serve.
+   * @param end_time The end time on the query (32-bit unsigned int, seconds).
    * @param max_age The maximum time (in seconds) we wanna allow clients to
    * cache the result in case of a cache hit.
    * @param basepath The base path used for the Gnuplot files.
@@ -510,11 +549,12 @@ final class GraphHandler implements HttpRpc {
    * the time taken to serve by the request and other JSON elements if wanted.
    */
   private StringBuilder loadCachedJson(final HttpQuery query,
+                                       final long end_time,
                                        final long max_age,
                                        final String basepath) {
     final String json_path = basepath + ".json";
     File json_cache = new File(json_path);
-    if (staleCacheFile(query, max_age, json_cache)) {
+    if (staleCacheFile(query, end_time, max_age, json_cache)) {
       return null;
     }
     final byte[] json = readFile(query, json_cache, 4096);
@@ -662,17 +702,23 @@ final class GraphHandler implements HttpRpc {
                         final Plot plot) throws IOException {
     final int nplotted = plot.dumpToFiles(basepath);
     final long start_time = System.nanoTime();
-    final Process gnuplot = new ProcessBuilder(
-        // XXX Java Kludge XXX
-        "./src/graph/mygnuplot.sh", basepath + ".out", basepath + ".err",
-                                    basepath + ".gnuplot").start();
-    int rv;
+    final Process gnuplot = new ProcessBuilder(GNUPLOT,
+      basepath + ".out", basepath + ".err", basepath + ".gnuplot").start();
+    final int rv;
     try {
       rv = gnuplot.waitFor();  // Couldn't find how to do this asynchronously.
     } catch (InterruptedException e) {
-      gnuplot.destroy();
       Thread.currentThread().interrupt();  // Restore the interrupted status.
       throw new IOException("interrupted", e);  // I hate checked exceptions.
+    } finally {
+      // We need to always destroy() the Process, otherwise we "leak" file
+      // descriptors and pipes.  Unless I'm blind, this isn't actually
+      // documented in the Javadoc of the !@#$%^ JDK, and in Java 6 there's no
+      // way to ask the stupid-ass ProcessBuilder to not create fucking pipes.
+      // I think when the GC kicks in the JVM may run some kind of a finalizer
+      // that closes the pipes, because I've never seen this issue on long
+      // running TSDs, except where ulimit -n was low (the default, 1024).
+      gnuplot.destroy();
     }
     gnuplotlatency.add((int) ((System.nanoTime() - start_time) / 1000000));
     if (rv != 0) {
@@ -865,6 +911,24 @@ final class GraphHandler implements HttpRpc {
   }
 
   /**
+   * Returns whether or not a date is specified in a relative fashion.
+   * <p>
+   * A date is specified in a relative fashion if it ends in "-ago",
+   * e.g. "1d-ago" is the same as "24h-ago".
+   * @param query The HTTP query from which to get the query string parameter.
+   * @param paramname The name of the query string parameter.
+   * @return {@code true} if the parameter is passed and is a relative date.
+   * Note the method doesn't attempt to validate the relative date.  So this
+   * function can return true on something that looks like a relative date,
+   * but is actually invalid once we really try to parse it.
+   */
+  private static boolean isRelativeDate(final HttpQuery query,
+                                        final String paramname) {
+    final String date = query.getQueryStringParam(paramname);
+    return date == null || date.endsWith("-ago");
+  }
+
+  /**
    * Returns a timestamp from a date specified in a query string parameter.
    * @param query The HTTP query from which to get the query string parameter.
    * @param paramname The name of the query string parameter.
@@ -905,6 +969,42 @@ final class GraphHandler implements HttpRpc {
     public Thread newThread(final Runnable r) {
       return new Thread(r, "Gnuplot #" + id.incrementAndGet());
     }
+  }
+
+  /** Name of the wrapper script we use to execute Gnuplot.  */
+  private static final String WRAPPER = "mygnuplot.sh";
+  /** Path to the wrapper script.  */
+  private static final String GNUPLOT;
+  static {
+    GNUPLOT = findGnuplotHelperScript();
+  }
+
+  /**
+   * Iterate through the class path and look for the Gnuplot helper script.
+   * @return The path to the wrapper script.
+   */
+  private static String findGnuplotHelperScript() {
+    final URL url = GraphHandler.class.getClassLoader().getResource(WRAPPER);
+    if (url == null) {
+      throw new RuntimeException("Couldn't find " + WRAPPER + " on the"
+        + " CLASSPATH: " + System.getProperty("java.class.path"));
+    }
+    final String path = url.getFile();
+    LOG.debug("Using Gnuplot wrapper at {}", path);
+    final File file = new File(path);
+    final String error;
+    if (!file.exists()) {
+      error = "non-existent";
+    } else if (!file.canExecute()) {
+      error = "non-executable";
+    } else if (!file.canRead()) {
+      error = "unreadable";
+    } else {
+      return path;
+    }
+    throw new RuntimeException("The " + WRAPPER + " found on the"
+      + " CLASSPATH (" + path + ") is a " + error + " file...  WTF?"
+      + "  CLASSPATH=" + System.getProperty("java.class.path"));
   }
 
   // ---------------- //
