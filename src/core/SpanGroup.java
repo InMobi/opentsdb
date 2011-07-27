@@ -455,11 +455,13 @@ final class SpanGroup implements DataPoints {
            : spans.get(i).downsampler(sample_interval, downsampler));
         iterators[i] = it;
         it.seek(start_time);
-        if (!it.hasNext()) {
+        final DataPoint dp;
+        try {
+          dp = it.next();
+        } catch (NoSuchElementException e) {
           throw new AssertionError("Span #" + i + " is empty! span="
                                    + spans.get(i));
         }
-        DataPoint dp = it.next();
         //LOG.debug("Creating iterator #" + i);
         if (dp.timestamp() >= start_time) {
           //LOG.debug("First DP in range for #" + i + ": "
@@ -779,6 +781,9 @@ final class SpanGroup implements DataPoints {
                              ? Double.longBitsToDouble(values[prev])
                              : values[prev]);
           final long x1 = timestamps[prev] & TIME_MASK;
+          assert x0 > x1: ("Next timestamp (" + x0 + ") is supposed to be "
+            + " strictly greater than the previous one (" + x1 + "), but it's"
+            + " not.  this=" + this);
           final double r = (y0 - y1) / (x0 - x1);
           //LOG.debug("Rate for " + y1 + " @ " + x1
           //          + " -> " + y0 + " @ " + x0 + " => " + r);

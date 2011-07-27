@@ -153,6 +153,9 @@ tsdb: Makefile
 	chmod a-w $@.tmp
 	mv $@.tmp $@
 
+printdeps:
+	@echo $(tsdb_DEPS) $(jar)
+
 # Adjust the paths in the 'tsdb' script after it's been installed.
 # This is kind of a hack, but I couldn't find a better way to adjust the paths
 # in the script before it gets installed...
@@ -163,7 +166,6 @@ install-exec-hook:
 	rm -f tsdb.tmp
 
 $(builddata_SRC): .git/HEAD $(tsdb_SRC) $(top_srcdir)/build-aux/gen_build_data.sh
-	$(MKDIR_P) `dirname "$(builddata_SRC)"`
 	$(srcdir)/build-aux/gen_build_data.sh $(builddata_SRC) $(package)
 
 jar: $(jar) $(UNITTESTS) .gwtc-stamp
@@ -317,5 +319,5 @@ clean-local:
 	rm -f $(jar) tsdb
 	rm -rf $(JAVADOC_DIR)
 
-.PHONY: jar doc check gwtc gwtdev staticroot gwttsd
+.PHONY: jar doc check gwtc gwtdev printdeps staticroot gwttsd
 include third_party/include.mk
