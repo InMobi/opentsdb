@@ -1,9 +1,9 @@
 // This file is part of OpenTSDB.
-// Copyright (C) 2010  The OpenTSDB Authors.
+// Copyright (C) 2010-2012  The OpenTSDB Authors.
 //
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or (at your
+// the Free Software Foundation, either version 2.1 of the License, or (at your
 // option) any later version.  This program is distributed in the hope that it
 // will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
 // of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser
@@ -129,7 +129,11 @@ final class HttpQuery {
    */
   public Map<String, List<String>> getQueryString() {
     if (querystring == null) {
-      querystring = new QueryStringDecoder(request.getUri()).getParameters();
+      try {
+        querystring = new QueryStringDecoder(request.getUri()).getParameters();
+      } catch (IllegalArgumentException e) {
+        throw new BadRequestException("Bad query string: " + e.getMessage());
+      }
     }
     return querystring;
   }
@@ -259,6 +263,16 @@ final class HttpQuery {
     } else {
       sendReply(HttpResponseStatus.NOT_FOUND, PAGE_NOT_FOUND);
     }
+  }
+
+  /** Redirects the client's browser to the given location.  */
+  public void redirect(final String location) {
+    // TODO(tsuna): We currently redirect with some HTML because `sendReply'
+    // doesn't easily allow us to pass a `Location' header, which is lame.
+    sendReply(HttpResponseStatus.OK,
+              makePage("<meta http-equiv=\"refresh\" content=\"0; url="
+                       + location + "\">",
+                       "Redirecting...", "Redirecting...", "Loading..."));
   }
 
   /** An empty JSON array ready to be sent. */

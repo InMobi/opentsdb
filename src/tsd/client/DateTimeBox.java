@@ -1,9 +1,9 @@
 // This file is part of OpenTSDB.
-// Copyright (C) 2010  The OpenTSDB Authors.
+// Copyright (C) 2010-2012  The OpenTSDB Authors.
 //
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or (at your
+// the Free Software Foundation, either version 2.1 of the License, or (at your
 // option) any later version.  This program is distributed in the hope that it
 // will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
 // of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser
@@ -53,7 +53,7 @@ final class DateTimeBox extends DateBox {
       public Date parse(final DateBox box,
                         final String text,
                         final boolean report_error) {
-        if (text.endsWith(" ago")) {  // "1d ago" and such
+        if (text.endsWith(" ago") || text.endsWith("-ago")) { // e.g. "1d ago".
           int interval;
           final int lastchar = text.length() - 5;
           try {
