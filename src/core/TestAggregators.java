@@ -51,8 +51,14 @@ public final class TestAggregators {
     public long nextLongValue() {
       return numbers[i++];
     }
+    public long nextLongValueNoLerp() {
+      return numbers[i++];
+    }
 
     public double nextDoubleValue() {
+      return numbers[i++];
+    }
+    public double nextDoubleValueNoLerp() {
       return numbers[i++];
     }
 

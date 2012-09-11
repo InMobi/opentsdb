@@ -497,7 +497,7 @@ final class Span implements DataPoints {
     public long nextLongValueNoLerp() {
       if (hasNextValue()) {
         moveToNext();
-        return current_row.longValue(pos);
+        return current_row.longValue();
       }
       throw new NoSuchElementException("no more longs in interval of " + this);
     }
@@ -519,7 +519,7 @@ final class Span implements DataPoints {
     public double nextDoubleValueNoLerp() {
       if (hasNextValue()) {
         moveToNext();
-        return current_row.toDouble(pos);
+        return current_row.toDouble();
       }
       throw new NoSuchElementException("no more floats in interval of " + this);
     }
